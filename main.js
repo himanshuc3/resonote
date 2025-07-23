@@ -4,6 +4,8 @@ const fs = require("fs");
 const { exec } = require("child_process");
 const path = require("path");
 const cors = require("cors");
+// const algoliaindexing = "./indexing"; 
+// const transcriber =  require("./transcribe");
 require("dotenv").config();
 
 const app = express();
@@ -11,7 +13,7 @@ const PORT = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json());
 
-const ASSEMBLY_API_KEY = process.env.ASSEMBLY_API_KEY;
+const ASSEMBLYAI_API_KEY = process.env.ASSEMBLYAI_API_KEY;
 const ALGOLIA_APP_ID = process.env.ALGOLIA_APP_ID;
 const ALGOLIA_ADMIN_KEY = process.env.ALGOLIA_ADMIN_KEY;
 const ALGOLIA_INDEX = process.env.ALGOLIA_INDEX;
@@ -31,13 +33,15 @@ async function downloadYoutubeAudio(ytURL, outputName) {
 }
 
 async function uploadAudioToAssemblyAI(filePath) {
+  // NOTE:
+  // 1. How are we streaming data into the endpoint for consumption?
     const data = fs.createReadStream(filePath);
     const res = await axios.post(
         "https://api.assemblyai.com/v2/upload",
         data,
         {
             headers: {
-                authorization: ASSEMBLY_API_KEY,
+                authorization: ASSEMBLYAI_API_KEY,
                 "Transfer-Encoding": "chunked",
             },
         }
@@ -57,7 +61,7 @@ async function transcribeAudio(audioUrl) {
     },
     {
       headers: {
-        authorization: ASSEMBLY_API_KEY,
+        authorization: ASSEMBLYAI_API_KEY,
       },
     }
   );
@@ -70,7 +74,7 @@ async function waitForTranscript(transcriptId) {
       `https://api.assemblyai.com/v2/transcript/${transcriptId}`,
       {
         headers: {
-          authorization: ASSEMBLY_API_KEY,
+          authorization: ASSEMBLYAI_API_KEY,
         },
       }
     );
@@ -83,31 +87,7 @@ async function waitForTranscript(transcriptId) {
 }
 
 async function indexToAlgolia(transcription, metadata = {}) {
-  const algolia = require("algoliasearch")(ALGOLIA_APP_ID, ALGOLIA_ADMIN_KEY);
-  const index = algolia.initIndex(ALGOLIA_INDEX);
-
-  const object = {
-    objectID: transcription.id,
-    text: transcription.text,
-    _mcp: {
-      content: transcription.text,
-      title: metadata.title || "YouTube Transcript",
-      id: transcription.id,
-      description: `Transcript with chapters and speaker labels from YouTube.`,
-      tags: transcription.entities?.map((e) => e.entity_type) || [],
-      metadata: {
-        chapters: transcription.chapters?.length || 0,
-        duration: transcription.audio_duration || 0,
-        speakers: [
-          ...new Set(
-            transcription.words?.map((w) => w.speaker).filter(Boolean)
-          ),
-        ],
-      },
-    },
-  };
-
-  await index.saveObject(object);
+  algoliaIndexing.indexTranscription(transcription, metadata);
 }
 
 
@@ -129,7 +109,9 @@ app.post("/transcribe", async (req, res) => {
     }
 })
 
-app.get("/", (_, res) => res.send("Youtube Audio Search Backend is running!"))
+app.get("/", (_, res) => {
+  res.send("Youtube Audio Search Backend is running!")
+})
 
 
 app.listen(PORT, () => {
