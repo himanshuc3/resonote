@@ -1,23 +1,30 @@
-require("dotenv").config();
-const express = require("express");
-const axios = require("axios");
-const ytdl = require("ytdl-core");
-const fs = require("fs");
-const { exec } = require("child_process");
-const path = require("path");
-const cors = require("cors");
-const algoliaindexing = require("./indexing");
-const transcriber =  require("./transcribe");
+import "dotenv/config";
+import express from "express";
+import axios from "axios";
+import ytdl from "ytdl-core";
+import fs from "fs";
+import { exec } from "child_process";
+import path from "path";
+import cors from "cors";
+import {fileURLToPath} from "url";
+import algoliaindexing from "./indexing/index.js";
+import transcriber from "./transcribe/index.js";
+import { startup, getSession } from "./mcpSession/index.js";
 
+startup()
 const app = express();
 const PORT = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json());
 
+
 const ASSEMBLYAI_API_KEY = process.env.ASSEMBLYAI_API_KEY;
 const ALGOLIA_APP_ID = process.env.ALGOLIA_APP_ID;
 const ALGOLIA_ADMIN_KEY = process.env.ALGOLIA_ADMIN_KEY;
 const ALGOLIA_INDEX = process.env.ALGOLIA_INDEX;
+  
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const OUTPUT_DIR = path.resolve(__dirname, "downloads");
 if (!fs.existsSync(OUTPUT_DIR)) fs.mkdirSync(OUTPUT_DIR);
@@ -28,16 +35,25 @@ async function downloadYoutubeAudio(ytURL) {
       .then((info) => {
         // Sanitize filename
         let safeTitle = info.videoDetails.title.replace(/[<>:"/\\|?*\x00-\x1F]/g, "_");
-        // Pick audio-only format (itag 140 = m4a, or fallback to audioonly filter)
-        let format = ytdl.chooseFormat(info.formats, { quality: "140" });
-        if (!format || !format.container) {
-          // fallback: use audioonly filter
-          format = { container: 'mp3' };
+        // Pick format with both video and audio, prefer mp4
+        let format = info.formats.find(f => f.container === 'mp4' && f.hasAudio && f.hasVideo);
+        if (!format) {
+          // fallback: any format with both video and audio
+          format = info.formats.find(f => f.hasAudio && f.hasVideo);
         }
+        if (!format) {
+          // fallback: any format with audio
+          format = info.formats.find(f => f.hasAudio);
+        }
+        if (!format) {
+          // fallback: any format
+          format = info.formats[0];
+        }
+        console.log('Chosen format:', format);
         const outputFilePath = path.join(OUTPUT_DIR, `${safeTitle}.${format.container}`);
         const outputStream = fs.createWriteStream(outputFilePath);
-        // Download audio only
-        ytdl(ytURL, { filter: 'audioonly' }).pipe(outputStream);
+        // Download the chosen format
+        ytdl(ytURL, { format: format }).pipe(outputStream);
         outputStream.on("finish", () => {
           console.log(`Finished downloading: ${outputFilePath}`);
           res(outputFilePath);
@@ -92,6 +108,21 @@ app.post("/download_video", async (req, res) => {
       error: "Failed to download video",
       details: err.message,
     });
+  }
+});
+
+app.post('/api/search', async (req, res) => {
+  try{
+
+    const { query } = req.body;
+    console.log("Search query:", query, ALGOLIA_INDEX);
+    const response = await getSession().callTool('searchSingleIndex', {
+      index: ALGOLIA_INDEX, query, filters: ''
+    });
+    res.json(response.result || response.content);
+  }catch(err){
+    console.error("Error in search endpoint:", err);
+    res.status(500).json({ error: "Failed to perform search", details: err.message });
   }
 });
 

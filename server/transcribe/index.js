@@ -1,6 +1,6 @@
-const { AssemblyAI } = require("assemblyai");
-const fs = require("fs");
-const axios = require("axios");
+import { AssemblyAI } from "assemblyai";
+import fs from "fs";
+import axios from "axios";
 
 class Transcriber {
   constructor(apiKey) {
@@ -96,4 +96,4 @@ class Transcriber {
 }
 
 const transcriber = new Transcriber(process.env.ASSEMBLYAI_API_KEY);
-module.exports = transcriber;
+export default transcriber;
